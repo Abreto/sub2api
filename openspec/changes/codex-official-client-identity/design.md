@@ -80,8 +80,8 @@
 
 ## Open Questions（阻塞 tasks/specs，需实测或后续决策）
 
-1. **vscode/desktop 与 cli 是否共享 installation-id**（是否共用 CODEX_HOME）：影响 K-bucket 档 class 语义与文档表述；不阻塞默认档。
-2. **各 family UA 版本段语义**：vscode 扩展（1.x?）与 desktop 的版本段是否可解析出引擎版本，决定版本下界怎么挂、能否复用 CLI 的自动同步机制。
+1. **vscode/desktop 与 cli 是否共享 installation-id**（是否共用 CODEX_HOME）：影响 K-bucket 档 class 语义与文档表述；不阻塞默认档。**已部分解锁（2026-09 实测样本）**：macOS Codex Desktop 真实 UA 为 `Codex Desktop/0.154.0-alpha.6.2 (Mac OS 26.6.2; arm64) unknown (Codex Desktop; 26.908.40834)`——独立 Desktop 的 originator 是 `Codex Desktop`（`Codex ` 家族，非 `codex_chatgpt_desktop`，后者属于 ChatGPT 桌面 app 内的 codex）；GUI 环境 terminal token 实锤为 `unknown`；尾部括号组是 clientInfo（app 名 + app build 号 26.x 形态，与引擎版本 0.15x 语义不同）。**已知缺陷**：canonical 组装链（`SetCodexUserAgentVersion`/`rewriteCodexUATrailerVersion`）会用 CLI 同步版本无差别覆盖 trailer 的 app build 号，产生自然界不存在的组合；desktop UA 应走直通分支原样透传，不做 canonical。UA 公式本身已由开源代码钉死（`{originator}/{引擎版本} ({os_type} {三段归一化版本}; {arch}) {terminal}`，os_info 3.14.0 语义化补零：15.5→15.5.0、22.04→22.4.0；WSL 下 WT_SESSION 透传使 `(Ubuntu …; x86_64) WindowsTerminal` 成为真实组合）。OAuth 与 API key 两种认证方式的 UA 同串（客户端构造与 auth mode 解耦，auth mode 只改变 base_url / Authorization / ChatGPT 专有头）。
+2. **vscode 扩展 UA 形态与 installation 共享**：唯一剩余待实测项。
 3. **K-bucket 的 OS 大版本粒度**：Windows NT 版本 10.0 同 cover Win10/Win11（build 区分），class key 取"OS 串归一化到已知枚举"还是"完整 OS 串"，需在实现时定（倾向：解析为白名单枚举，解析失败在门处拒绝）。
 4. **灰度与一次性身份切换**：按账号比例灰度的具体机制（特性开关粒度：全局 / 分组 / 账号）。
 5. **旧配置迁移映射表**：五个旧开关 → 新 policy 档位的精确映射与 deprecation 期长度。
