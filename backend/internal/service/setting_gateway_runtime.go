@@ -100,10 +100,12 @@ const antigravityUserAgentVersionDBTimeout = 5 * time.Second
 // 默认采用 codex-tui 身份，版本段随 codexCLIVersion 一起更新。
 const DefaultOpenAICodexUserAgent = codexCLIUserAgent
 
-// cachedOpenAICodexUserAgent 缓存 OpenAI Codex UA（进程内缓存，60s TTL）
+// cachedOpenAICodexUserAgent 缓存 OpenAI Codex UA（进程内缓存，60s TTL）。
+// configured 表示面板是否显式配置了 UA（未配置时出站身份可启用账号级 profile 派生）。
 type cachedOpenAICodexUserAgent struct {
-	value     string
-	expiresAt int64 // unix nano
+	value      string
+	configured bool
+	expiresAt  int64 // unix nano
 }
 
 // cachedOpenAICodexClientVersion 缓存出站 Codex 客户端版本号（进程内缓存，60s TTL）
@@ -264,20 +266,33 @@ func (s *SettingService) GetAntigravityUserAgentVersion(ctx context.Context) str
 // GetOpenAICodexUserAgent 返回 OpenAI Codex 上游请求使用的 User-Agent。
 // 后台设置优先；为空时回退到内置默认值。
 func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
+	return s.loadOpenAICodexUserAgentCached(ctx).value
+}
+
+// IsOpenAICodexUserAgentConfigured 返回面板是否显式配置了 Codex UA。
+// 未配置时出站身份解析链可为每个账号派生独立的 canonical profile
+//（见 openai_codex_ua_profile.go），配置了则尊重管理员显式意图。
+func (s *SettingService) IsOpenAICodexUserAgentConfigured(ctx context.Context) bool {
+	return s.loadOpenAICodexUserAgentCached(ctx).configured
+}
+
+// loadOpenAICodexUserAgentCached 是 UA 值与「面板已配置」判定的共享缓存加载器
+//（60s TTL + singleflight，两个读取方共用同一次 DB 往返）。
+func (s *SettingService) loadOpenAICodexUserAgentCached(ctx context.Context) *cachedOpenAICodexUserAgent {
 	fallback := DefaultOpenAICodexUserAgent
 	if s == nil || s.settingRepo == nil {
-		return fallback
+		return &cachedOpenAICodexUserAgent{value: fallback}
 	}
 	if cached, ok := s.openAICodexUACache.Load().(*cachedOpenAICodexUserAgent); ok && cached != nil {
 		if time.Now().UnixNano() < cached.expiresAt {
-			return cached.value
+			return cached
 		}
 	}
 
 	result, _, _ := s.openAICodexUASF.Do("openai_codex_user_agent", func() (any, error) {
 		if cached, ok := s.openAICodexUACache.Load().(*cachedOpenAICodexUserAgent); ok && cached != nil {
 			if time.Now().UnixNano() < cached.expiresAt {
-				return cached.value, nil
+				return cached, nil
 			}
 		}
 		if ctx == nil {
@@ -288,26 +303,30 @@ func (s *SettingService) GetOpenAICodexUserAgent(ctx context.Context) string {
 		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAICodexUserAgent)
 		if err != nil && !errors.Is(err, ErrSettingNotFound) {
 			slog.Warn("failed to get openai codex user agent setting", "error", err)
-			s.openAICodexUACache.Store(&cachedOpenAICodexUserAgent{
+			cached := &cachedOpenAICodexUserAgent{
 				value:     fallback,
 				expiresAt: time.Now().Add(openAICodexUserAgentErrorTTL).UnixNano(),
-			})
-			return fallback, nil
+			}
+			s.openAICodexUACache.Store(cached)
+			return cached, nil
 		}
 		ua := strings.TrimSpace(value)
+		configured := ua != ""
 		if ua == "" {
 			ua = fallback
 		}
-		s.openAICodexUACache.Store(&cachedOpenAICodexUserAgent{
-			value:     ua,
-			expiresAt: time.Now().Add(openAICodexUserAgentCacheTTL).UnixNano(),
-		})
-		return ua, nil
+		cached := &cachedOpenAICodexUserAgent{
+			value:      ua,
+			configured: configured,
+			expiresAt:  time.Now().Add(openAICodexUserAgentCacheTTL).UnixNano(),
+		}
+		s.openAICodexUACache.Store(cached)
+		return cached, nil
 	})
-	if ua, ok := result.(string); ok && ua != "" {
-		return ua
+	if cached, ok := result.(*cachedOpenAICodexUserAgent); ok && cached != nil {
+		return cached
 	}
-	return fallback
+	return &cachedOpenAICodexUserAgent{value: fallback}
 }
 
 // GetOpenAICodexClientVersion 返回出站声明的 Codex 客户端版本号。

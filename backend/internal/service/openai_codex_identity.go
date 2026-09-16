@@ -1,6 +1,7 @@
 package service
 
 import (
+	"fmt"
 	"net/http"
 	"regexp"
 	"strings"
@@ -130,6 +131,31 @@ type codexOutboundIdentity struct {
 	version    string
 }
 
+// codexCanonicalPanelUAConfiguredResolver 返回面板是否显式配置了 Codex UA。
+// 由 SettingService 在装配时注入；未注入时保守返回 true（视为已配置，不启用
+// 账号级派生），保证独立使用 identity 纯函数的路径行为不变。
+var (
+	codexCanonicalPanelConfiguredMu       sync.RWMutex
+	codexCanonicalPanelUAConfiguredResolv func() bool
+)
+
+// SetCodexCanonicalPanelUAConfiguredResolver 注入「面板 UA 已配置」判定。
+func SetCodexCanonicalPanelUAConfiguredResolver(resolver func() bool) {
+	codexCanonicalPanelConfiguredMu.Lock()
+	defer codexCanonicalPanelConfiguredMu.Unlock()
+	codexCanonicalPanelUAConfiguredResolv = resolver
+}
+
+func codexCanonicalPanelUAConfigured() bool {
+	codexCanonicalPanelConfiguredMu.RLock()
+	resolver := codexCanonicalPanelUAConfiguredResolv
+	codexCanonicalPanelConfiguredMu.RUnlock()
+	if resolver != nil {
+		return resolver()
+	}
+	return true
+}
+
 // resolveCodexOutboundIdentity 由候选 User-Agent 推导自洽的出站身份。
 // candidateUA 为空时使用规范 User-Agent；推导不出官方身份时整体回退为规范 TUI 身份。
 //
@@ -138,7 +164,17 @@ type codexOutboundIdentity struct {
 // 永久钉死在陈旧版本上，绕过版本自动同步，落回上游优先降载的那一侧。
 // 需要固定版本请填「Codex 客户端版本号」并关闭自动同步。
 func resolveCodexOutboundIdentity(candidateUA string) codexOutboundIdentity {
-	canonical := codexCanonicalUserAgent()
+	return resolveCodexOutboundIdentityWithCanonical(candidateUA, canonicalCodexUserAgentForSeed(""))
+}
+
+// resolveCodexOutboundIdentityForAccount 是带账号句柄的变体：面板未显式配置 UA
+// 且开关开启时，canonical 回退为按账号身份 namespace 确定性派生的机器 profile
+// （见 openai_codex_ua_profile.go），消灭全网关共享同一精确 UA 串的单点指纹。
+func resolveCodexOutboundIdentityForAccount(candidateUA string, account *Account) codexOutboundIdentity {
+	return resolveCodexOutboundIdentityWithCanonical(candidateUA, canonicalCodexUserAgentForSeed(codexAccountIdentityNamespace(account)))
+}
+
+func resolveCodexOutboundIdentityWithCanonical(candidateUA, canonical string) codexOutboundIdentity {
 	if _, _, ok := openai.PairCodexClientIdentity(canonical); !ok {
 		canonical = codexCLIUserAgent
 	}
@@ -220,6 +256,14 @@ func enforceCodexIdentityHeaders(h http.Header) {
 // 不应被补回。需要从缺失身份头恢复的调用方应先调用 ensureCodexIdentityHeaders。
 // 必须在所有 User-Agent 改写之后调用。
 func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
+	enforceCodexIdentityHeadersForAccount(h, nil, overrideUA)
+}
+
+// enforceCodexIdentityHeadersForAccount 是带账号句柄的强制统一入口：canonical 身份
+// 在面板未显式配置 UA 时按账号确定性派生（每账号一台稳定的伪机器），其余语义与
+// enforceCodexIdentityHeadersWithUA 逐点一致。所有拿得到 account 的出站路径
+// （Forward / 透传 / WS / 探针 / 模型列表等）应改用本函数。
+func enforceCodexIdentityHeadersForAccount(h http.Header, account *Account, overrideUA string) {
 	if h == nil || h.Get("originator") == "" {
 		return
 	}
@@ -227,10 +271,32 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 		pairCodexIdentityHeaders(h)
 		return
 	}
-	identity := resolveCodexOutboundIdentity(overrideUA)
+	identity := resolveCodexOutboundIdentityForAccount(overrideUA, account)
 	h.Set("user-agent", identity.userAgent)
 	h.Set("originator", identity.originator)
 	h.Set("version", identity.version)
+}
+
+// codexCLIFamilyOriginators 是允许充当 canonical / 回退身份的 CLI 家族 originator。
+// `Codex ` 空格家族（Codex Desktop 等）与 vscode 扩展被排除：它们的版本段语义
+//（app build 号 / 扩展版本线）无法由 CLI 自动同步正确维护。
+var codexCLIFamilyOriginators = map[string]bool{
+	"codex-tui":    true,
+	"codex_cli_rs": true,
+	"codex_exec":   true,
+}
+
+// ValidateOpenAICodexCanonicalUserAgent 校验面板/账号级配置的出站 Codex UA：
+// 必须能配对出官方身份，且客户端名属于 CLI 家族（openspec codex-official-client-identity 0c'）。
+func ValidateOpenAICodexCanonicalUserAgent(ua string) error {
+	originator, _, ok := openai.PairCodexClientIdentity(ua)
+	if !ok {
+		return fmt.Errorf("invalid Codex User-Agent: expect official {client}/{version} ({os}; {arch}) {terminal} form")
+	}
+	if !codexCLIFamilyOriginators[originator] {
+		return fmt.Errorf("canonical Codex User-Agent only supports CLI family clients (codex-tui/codex_cli_rs/codex_exec), got %q", originator)
+	}
+	return nil
 }
 
 // pairCodexIdentityHeaders 是关闭强制统一后的兜底收口：保留客户端真实身份，

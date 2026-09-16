@@ -783,6 +783,11 @@ func ProvideSettingService(settingRepo SettingRepository, groupRepo GroupReposit
 	SetCodexCanonicalUserAgentResolver(func() string {
 		return svc.GetOpenAICodexCanonicalUserAgent(context.Background())
 	})
+	// 「面板 UA 是否显式配置」与 UA 值共享同一份 60s TTL 缓存与 singleflight；
+	// 未配置时出站身份解析链为每个账号派生独立的 canonical profile。
+	SetCodexCanonicalPanelUAConfiguredResolver(func() bool {
+		return svc.IsOpenAICodexUserAgentConfigured(context.Background())
+	})
 	return svc
 }
 

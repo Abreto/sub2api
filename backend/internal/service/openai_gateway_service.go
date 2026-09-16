@@ -538,6 +538,8 @@ func NewOpenAIGatewayService(
 	// 拿不到配置，故在此发布进程级开关快照。配置取反义，零值即「强制统一出口开启」。
 	if cfg != nil {
 		SetCodexIdentityEnforcementEnabled(!cfg.Gateway.DisableCodexIdentityEnforcement)
+		// 账号级 canonical UA profile 派生开关（kill-switch）：关闭后退回全局 canonical。
+		SetCodexAccountUAProfileEnabled(!cfg.Gateway.DisableCodexAccountUAProfile)
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,

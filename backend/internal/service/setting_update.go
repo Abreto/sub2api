@@ -482,6 +482,14 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	updates[SettingKeyRewriteMessageCacheControl] = strconv.FormatBool(settings.RewriteMessageCacheControl)
 	updates[SettingKeyEnableClientDatelineNormalization] = strconv.FormatBool(settings.EnableClientDatelineNormalization)
 	updates[SettingKeyAntigravityUserAgentVersion] = antigravity.NormalizeUserAgentVersion(settings.AntigravityUserAgentVersion)
+	// canonical Codex UA 只接受 CLI 家族（openspec codex-official-client-identity 0c'）：
+	// `Codex ` 家族 / vscode 的版本段语义（app build 号 / 扩展版本线）无法由 CLI
+	// 自动同步正确维护，进 canonical 只会被版本重建改坏成不存在的组合。
+	if ua := strings.TrimSpace(settings.OpenAICodexUserAgent); ua != "" {
+		if err := ValidateOpenAICodexCanonicalUserAgent(ua); err != nil {
+			return nil, err
+		}
+	}
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)
 	updates[SettingKeyOpenAICodexClientVersion] = NormalizeCodexClientVersion(settings.OpenAICodexClientVersion)
 	updates[SettingKeyOpenAICodexVersionAutoSyncEnabled] = strconv.FormatBool(settings.OpenAICodexVersionAutoSyncEnabled)

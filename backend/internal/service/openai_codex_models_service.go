@@ -1692,7 +1692,9 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 	if !useAPIKeyUpstream {
 		overrideUA = credAccount.GetOpenAIUserAgent()
 	}
-	identity := resolveCodexOutboundIdentity(overrideUA)
+	// useAPIKeyUpstream 时 credAccount 是 API-key 账号，其身份 namespace 为空，
+	// 派生自然退化为全局 canonical，无需分支。
+	identity := resolveCodexOutboundIdentityForAccount(overrideUA, credAccount)
 	headers.Set("Originator", identity.originator)
 	headers.Set("User-Agent", identity.userAgent)
 	// Version 头优先与 client_version 查询参数同源：客户端自报版本合法且不低于上游

@@ -254,7 +254,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 	if turnMetadata := openAIAlphaSearchInboundHeader(c, "X-Codex-Turn-Metadata"); turnMetadata != "" {
 		req.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 	}
-	canonical := resolveCodexOutboundIdentity("")
+	canonical := resolveCodexOutboundIdentityForAccount("", account)
 	if version := openAIAlphaSearchInboundHeader(c, "Version"); version != "" {
 		req.Header.Set("Version", version)
 	} else {
@@ -282,7 +282,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		req.Header.Set("Conversation_ID", isolated)
 	}
 	applyCodexAccountIdentityHeaders(req.Header, codexAccountIdentitySource(c, account), apiKeyID)
-	enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+	enforceCodexIdentityHeadersForAccount(req.Header, account, s.codexIdentityOverrideUA(account))
 	account.ApplyHeaderOverrides(req.Header)
 	return req, nil
 }
@@ -400,7 +400,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 			req.Header.Set("X-Codex-Turn-Metadata", turnMetadata)
 		}
 		applyCodexAccountIdentityHeaders(req.Header, codexAccountIdentitySource(c, account), getAPIKeyIDFromContext(c))
-		canonical := resolveCodexOutboundIdentity("")
+		canonical := resolveCodexOutboundIdentityForAccount("", account)
 		if version := openAIAlphaSearchInboundHeader(c, "Version"); version != "" {
 			req.Header.Set("Version", version)
 		} else {
@@ -421,7 +421,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		if s.cfg != nil && s.cfg.Gateway.ForceCodexCLI {
 			req.Header.Set("User-Agent", canonical.userAgent)
 		}
-		enforceCodexIdentityHeadersWithUA(req.Header, s.codexIdentityOverrideUA(account))
+		enforceCodexIdentityHeadersForAccount(req.Header, account, s.codexIdentityOverrideUA(account))
 	}
 
 	account.ApplyHeaderOverrides(req.Header)

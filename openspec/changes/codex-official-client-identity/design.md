@@ -11,6 +11,7 @@
 - **WS 池**：`normalizeOpenAIWSHandshakeCompatibility`（`openai_ws_pool.go`）仅在指纹收敛非 off 时把 installation/session 纳入连接分桶；off 时连接跨用户共享，握手头停留在创建者。ingress 已有 `ctx_pool/shared/dedicated/passthrough/http_bridge` 模式（per-account 可配），`dedicated` = 每下游连接强制新上游连接。
 - **客户端门**：`codex_cli_only` 检测器（`openai_client_restriction_detector.go`）已具备 strict UA 前缀、originator 精确集、min/max 版本、引擎指纹 AND 门、黑/白名单，目前是账号 opt-in。
 - **UA 收敛的引入历史（2026-08 考古，git 考证）**：收敛不是反指纹措施，是 2026-07 底上游容量降载事故的止血方案。时间线：02-07 `ce764bf2d` ForceCodexCLI（显式"伪装 UA"）→ 07-10 `8a51119e3` #3901 配对 404 → 08-02 `e1b76e224` 上游按 **originator 桶**降载（07-29 起 codex-tui 入桶、codex_cli_rs 正常，且 codex_cli_rs 配 curl UA 亦可正常返回——证明降载因子是 originator + 版本新旧，不是 UA 的 OS/arch/terminal 多样性），网关把 `server_is_overloaded` 误判为账号故障导致冷却风暴 → 08-03 `2eb24814f` 全员统一 canonical 身份 + 3h 自动同步版本 → 08-07 `dbb42881c` 默认身份 codex_cli_rs → codex-tui 再翻转（追着动态降载桶跑）。两个推论：① 保留真实 UA（OS/arch/terminal）+ 官方 originator + 较新版本不会比统一身份更触发降载；② 统一身份有单点脆弱性——身份一旦入桶即 100% 流量被降载，真实身份分布天然只部分中桶。
+- **外部风控证据（CISA AA26-251A，2026-09-08，NSA/CISA/FBI 联合通告）**：通告描述前沿模型方对工业化蒸馏的四项检测指标，逐字为 "shared accounts from multiple IPs/user agents"、"24/7 sustained usage without human variation/idle periods"、"anomalous subscription-to-API usage ratios"、"new subscriptions immediately at maximum usage"。对位到 sub2api：① **多 IP/多 UA 共享账号是官方证实的检测分析**——per-account 的 UA 基数必须收敛到"人类多设备"量级且长期稳定（支撑 D8 的按规模分档与 class 派生 UA）；② 后三项是结构性信号（共享池全天候运转、订阅转 API、新号即满载），**身份工程无法消除**，属于产品形态固有暴露；③ 通告还点名"元数据净化"本身可检测（"previously consistent metadata 的突然消失"）——约束本方案：派生值但**保留字段形态**（不得整体丢弃 client_metadata/turn-metadata 等真实客户端会发的字段），且身份值必须**长期稳定**（禁止按请求/按天随机切换，部署切换是一次性 churn）。IP 侧（全部账号共享网关出口）为相邻工作流；TLS 指纹同为相邻工作流——OpenAI OAuth 主请求走 Go http.Transport 原生 TLS 指纹，与 codex 客户端（Rust/rustls）完全不同（issue #3624，账号级 TLS 伪装目前仅 Anthropic OAuth 生效），无视 UA 层伪装。OpenAI 官方已点名 sub2api 产品形态（订阅转 API 分享），社区证据（secrss 实测、腾讯云/TeamoRouter 指南）为次要佐证。
 - **调度粘性**：`GenerateSessionHash` 用客户端原始 session 信号做 sticky，与账号侧派生天然兼容（派生在账号选定后进行）。
 
 
@@ -36,7 +37,16 @@
 - 校验替代改写：UA 形态校验、originator↔UA 首段配对（#3901）、version ≥ per-family 下界（CLI 挂 `codexUpstreamMinVersion`，现有差异化文案"请升级 Codex"复用）。vscode/desktop 版本段语义不同源，先只做下界 + 形态校验，Max 卡太死会挡正常升级（现 policy 中 Max 本就可选）。
 - 备选：继续 opt-in `codex_cli_only`。否决：伪装面（桥接整形）正是依赖"门不开也得能过"的存在。
 
-### D2：UA 校验后原样出站，不做系统版本归一化
+### D2：UA 策略——Phase 1 采用格子收敛（2026-09 定稿，arch 按 OS 钉/留）
+- 格子 = `(os × arch, family, version)`：**Mac 钉死 arm64、Windows 钉死 x86_64、Linux 保留用户真实 arch（x86_64/arm64）**——即 4 个 os×arch 组合 × 2 family × 3 version，上界 24，单账号活跃组合典型 5-10。钉死砍掉的是 Mac-Intel / Win-ARM 两个低人口格，HTTP 层不可验证、几乎不损失拟真；Linux 双 arch 保留（ARM 云主机/开发板在开发者人群真实大份额）。入站真实 UA 分类落格，出站 UA 由格子生成：
+  - **CLI**：整串生成——`codex-tui/{用户真实版本(窗口内)} ({归一化 OS 串}; {格内 arch}) {terminal}`；terminal 仍按 `(account, os)` 从 seed 确定性定一个高人口值（freeform 字段防铸造，不保留用户值）；OS 版本归一化为「当前主流」，随发版更新表（含 os_info 三段归一化）。
+  - **Desktop**：窗口内**透传 + 仅归一化 OS 段**（trailer 是 app build 号、无同步来源，禁止整串重造）；terminal 天然 `unknown`。
+  - 版本段保留用户真实值（窗口内）；自动同步版本只用于回退流量。窗口 per-family（desktop 引擎版本滞后 CLI 发布线，单独放宽）；下界复用 `MinCodexVersion` 设置 + 自动同步派生，拒绝文案用现成的「请升级 Codex」。
+- 超大共享账号的再收紧旋钮：Linux 的 arch 也降级为按 `(account, os)` seed 定一个（上界 →12，不改架构）。
+- **一致性规则：UA 格子维度 = installation 派生 class 维度**（installation 按 `(family, os, arch)` 派生——同 D3 K-bucket class 定义；key 统一含 arch，Mac/Win 天然只有一值无需特判）；UA 含某可变维度而 installation 不含，会让同一 installation 跨该维度的多个值出现（不可能组合转移至设备层）。
+- 备选：原样透传（不做格子）。保留给单租户账号档；共享账号默认格子收敛（AA26-251A 指标 1）。归一化系统版本曾被否决（浓度聚类论），格子方案复活它的原因是：每格 UA 由真实维度差异提供账号内多样性、由 account seed 提供 terminal 差异，不再是全网关同串——浓度担忧只适用于无差异的全局归一。
+
+### D2-旧：UA 校验后原样出站（已被上方格子方案取代为默认，保留为单租户档）
 - per-install 派生（D3）下，每个派生 installation 对应一个真实安装，其 OS 版本/arch/terminal/版本全部真实自洽：版本漂移=升级、terminal 变化=换终端、OS 版本变化=系统升级，均合法。
 - 归一化的三个否决理由：全网关部署归一到同一 OS 串会制造不自然的浓度聚类（恰好与归一化的初衷相反）；desktop UA 形态杂、归一化规则维护成本高；归一化只有配"每平台完全收敛"时才必需，而收敛已降为非默认档。
 - UA 字段是否进 installation 派生 key 的结论（讨论演进记录）：family 进（不同 app=不同安装）；app version 不进（升级不变 id）；OS 版本不进（原地升级）；platform/OS 种类+大版本进（换机器才算新设备；Win10/Win11 必须分设备）；arch 必须进（一台机器不可能换 arch，混用即异常信号）；terminal 不能进（freeform 可控字段，轮换即可铸造伪设备）。
@@ -71,12 +81,23 @@
 - 非 OAuth 平台不动：API Key 账号继续服务通用 OpenAI SDK 流量，桥接整形对该路径保留。
 
 ### D8：基数风险的观测优先
-- 两个方向相反的信号不可同时消除：设备基数/churn（随用户量线性涨）与单设备形态（随设备数收紧而超人化）。已知检测器在后者开过火；前者无记录但「真实 UA + 不控基数」组合从未上过生产。
-- 故默认拟真端 + 三指标观测（distinct installations / 新增设备速率 / 每设备并发会话）+ 告警 + K-bucket 档兜底。账号聚合负载的隐藏不在本方案目标内（调度侧并发预算已存在）。
+- 两个方向相反的信号不可同时消除：设备基数/churn（随用户量线性涨）与单设备形态（随设备数收紧而超人化）。已知检测器在后者开过火；前者无记录但「真实 UA + 不控基数」组合从未上过生产。**2026-09 外部风控报告修正**：UA/设备数量确为共享评分维度之一（非硬阈值，官方政策容忍多设备），故默认档按账号用户规模分化——多用户共享账号默认 K-bucket 收紧档且 **UA 一并按 class 派生为稳定值**（只收敛 installation 不收敛 UA，基数仍随用户数涨）；单租户/低用户数账号默认 per-install + UA 直通。档位可按账号配置或按活跃用户数自动选择。
+- 故默认按账号规模分档 + 三指标观测（distinct installations / 新增设备速率 / 每设备并发会话）+ 告警 + 档位兜底。账号聚合负载的隐藏不在本方案目标内（调度侧并发预算已存在）。
+- **相邻工作流（超出本设计范围，优先级可能更高）**：OpenAI OAuth 路径 TLS 指纹伪装（uTLS 模拟 rustls，对齐现有 Anthropic TLS profile 机制）；每账号独立出口 IP。
 
 ### D9：配置收敛
 - 新单一 policy（OAuth 账号）：客户端门（family + 版本下界 + 引擎指纹开关）、installation 档位（default/passthrough/kbucket）、WS ingress 模式。
 - 进入 deprecation：`ForceCodexCLI`、`gateway.disable_codex_identity_enforcement`、账号级 UA 覆写、`codex_cli_only`（被默认门吸收）、`codex_fingerprint_mode`（被档位吸收）。兼容期保留读旧配置映射到新 policy 的最接近档位。
+
+## Phase 0：UA 专项修复（独立于完整重构，先行上线）
+
+目标：每账号出站 UA 集合落在「人类多设备」区间——数量少、长期稳定、每条真实；同时消灭全网关共享串。AA26-251A 三条红线：① 身份值长期稳定（生成后钉死，禁止按请求/按天重随机）；② 保留字段形态（不因去整形而删除真实客户端会发的 header/字段）；③ 版本段继续走自动同步（profile 不含版本）。
+
+- **0a. 每账号稳定 canonical UA（2026-09 按 AA26-251A 从部署级升级为账号级）**：canonical 出站 UA 改为 `weighted_pick(profile_table, sha256(codexFingerprintSeed))` 确定性派生的「机器 profile 后缀」——客户端家族固定 `codex-tui`，`(os; arch) terminal` 后缀从真实分布加权表选取（表 ~15-30 条高人口真实组合，权重≈真实流量占比，含 WSL 的 `(Ubuntu …; x86_64) WindowsTerminal`；生成器实现 os_info 三段归一化），版本段由自动同步重建、不进 profile。目标不是账号间唯一（碰撞合法且符合真实分布），而是：① 逃离单点（不再全员同串）；② 部署内账号群分布 ≈ 真实 UA 人口分布；③ 每账号稳定（同 seed 永远同 profile，零状态可重算，永不重随机）。无账号上下文的出站点用部署级 seed（生成一次钉死，持久化到内部 key）。附带 0c'（面板/账号 UA 保存时校验必须 CLI 家族）。配 kill-switch。
+- **0b. 官方 UA 直通——移出 Phase 0，并入 Phase 1**：AA26-251A 证实「shared accounts from multiple IPs/user agents」为检测指标，共享账号上直通 = UA 基数随下游用户数线性涨，必须与档位策略（单租户直通 / 共享 class 派生）绑定决策，不适合作为独立先行步骤。
+- 明确不做：全量放行真实 UA（等门 + 档位）；翻转 `disable_codex_identity_enforcement` 默认值（回到 8·3 事故前语义）；UA 归一化到系统版本级别（见 D2）。
+- 已完成（零代码）：面板配置本部署独有真实 UA 作为过渡。
+- 上线观测：`server_is_overloaded` 比率与上游错误率；接受一次性"换设备"churn。
 
 ## Open Questions（阻塞 tasks/specs，需实测或后续决策）
 
