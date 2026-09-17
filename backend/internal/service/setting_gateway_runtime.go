@@ -303,9 +303,12 @@ func (s *SettingService) loadOpenAICodexUserAgentCached(ctx context.Context) *ca
 		value, err := s.settingRepo.GetValue(dbCtx, SettingKeyOpenAICodexUserAgent)
 		if err != nil && !errors.Is(err, ErrSettingNotFound) {
 			slog.Warn("failed to get openai codex user agent setting", "error", err)
+			// DB 故障窗口保守视为「面板已配置」：避免配置了面板 UA 的部署在
+			// 面板值 ↔ 每账号派生之间随故障抖动振荡（身份值必须长期稳定）。
 			cached := &cachedOpenAICodexUserAgent{
-				value:     fallback,
-				expiresAt: time.Now().Add(openAICodexUserAgentErrorTTL).UnixNano(),
+				value:      fallback,
+				configured: true,
+				expiresAt:  time.Now().Add(openAICodexUserAgentErrorTTL).UnixNano(),
 			}
 			s.openAICodexUACache.Store(cached)
 			return cached, nil

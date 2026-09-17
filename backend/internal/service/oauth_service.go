@@ -18,6 +18,14 @@ type OpenAIOAuthClient interface {
 	RefreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL string, clientID string) (*openai.TokenResponse, error)
 }
 
+// OpenAIOAuthClientWithIdentity 是可选能力接口：实现它的 OAuth client 支持
+// 携带调用方指定的出站身份对（User-Agent / originator）做 token 刷新，使凭据面
+// 与推理面共用同一账号级 canonical 身份。未实现的 client（含测试 mock）自动
+// 走 RefreshTokenWithClientID 的全局 canonical 语义，行为不变。
+type OpenAIOAuthClientWithIdentity interface {
+	RefreshTokenWithIdentity(ctx context.Context, refreshToken, proxyURL, clientID, userAgent, originator string) (*openai.TokenResponse, error)
+}
+
 // GrokOAuthClient interface for xAI/Grok OAuth operations.
 type GrokOAuthClient interface {
 	ExchangeCode(ctx context.Context, code, codeVerifier, redirectURI, proxyURL, clientID string) (*xai.TokenResponse, error)

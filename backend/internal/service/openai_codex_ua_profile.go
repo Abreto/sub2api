@@ -50,20 +50,25 @@ var codexUAProfileTable = []codexUAProfileEntry{
 
 const codexUAProfileSeedNamespace = "sub2api:codex-ua-profile:v1:"
 
+// codexUAProfileTotalWeight 是表的权重总和（包级常量语义，随表一起维护）。
+var codexUAProfileTotalWeight = func() int {
+	total := 0
+	for _, entry := range codexUAProfileTable {
+		total += entry.weight
+	}
+	return total
+}()
+
 // deriveCodexUAProfileSuffix 由身份 seed 确定性派生 profile 后缀
 // （" (os; arch) terminal"）。同一 seed 永远返回同一结果：纯函数、零状态、
 // 重启不漂移。目标不是账号间唯一（碰撞合法且符合真实 UA 人口分布），而是
 // 消灭「全网关 / 全部署共享同一精确 UA 串」的单点指纹。
 func deriveCodexUAProfileSuffix(identitySeed string) string {
-	if identitySeed == "" {
+	if identitySeed == "" || codexUAProfileTotalWeight <= 0 {
 		return codexCLIUserAgentSuffix
 	}
-	total := 0
-	for _, entry := range codexUAProfileTable {
-		total += entry.weight
-	}
 	sum := sha256.Sum256([]byte(codexUAProfileSeedNamespace + identitySeed))
-	cursor := binary.BigEndian.Uint64(sum[:8]) % uint64(total)
+	cursor := binary.BigEndian.Uint64(sum[:8]) % uint64(codexUAProfileTotalWeight)
 	for _, entry := range codexUAProfileTable {
 		if cursor < uint64(entry.weight) {
 			return " (" + entry.os + "; " + entry.arch + ") " + entry.terminal

@@ -19,6 +19,10 @@
 
 ### 收尾
 
+- [x] 凭据面（token 刷新）携带账号级身份：`OpenAIOAuthClientWithIdentity` 可选能力接口 + `RefreshAccountToken` 注入，避免同一 OAuth 跨面呈现两台"机器"（kimi review 跟进）
+- [x] kimi review P1 修复：account_test_service 5 处探针 + openai_live 2 处迁移到 ForAccount
+- [x] kimi review P2 修复：DB 错误路径保守视为已配置（防身份振荡）；空表 panic 守卫 + 权重总和提升为包级；0c' 校验仅在 UA 值变更时生效（旧非法存量值不阻塞其他设置保存）；测试 helper 恢复 resolver 原值
+- [ ] 部署级 seed（design 0a 承诺）：无账号上下文路径（首次 ExchangeCode 登录、ensure/pair 兜底）仍用全局 canonical——低频路径，推迟到 Phase 1 或独立小步
 - [ ] 用户操作：部署本版本后清除面板中手动配置的过渡 UA，启用每账号派生
 - [ ] 上线观测：`server_is_overloaded` 比率、上游错误率；接受一次性「换设备」churn
 

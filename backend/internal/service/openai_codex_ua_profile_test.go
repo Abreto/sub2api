@@ -23,10 +23,12 @@ func codexProfileTestAccount(accountID string) *Account {
 
 func setCodexPanelUAConfiguredForTest(t *testing.T, configured bool) {
 	t.Helper()
-	prev := codexCanonicalPanelUAConfigured()
+	codexCanonicalPanelConfiguredMu.RLock()
+	prev := codexCanonicalPanelUAConfiguredResolv
+	codexCanonicalPanelConfiguredMu.RUnlock()
 	SetCodexCanonicalPanelUAConfiguredResolver(func() bool { return configured })
 	t.Cleanup(func() {
-		SetCodexCanonicalPanelUAConfiguredResolver(func() bool { return prev })
+		SetCodexCanonicalPanelUAConfiguredResolver(prev)
 	})
 }
 
@@ -98,6 +100,14 @@ func TestBuildCodexProfileUserAgent(t *testing.T) {
 func TestResolveCodexOutboundIdentityForAccountDerivesProfile(t *testing.T) {
 	setCodexPanelUAConfiguredForTest(t, false)
 	setCodexAccountUAProfileEnabledForTest(t, true)
+
+	// nil 账号显式安全：退回全局 canonical，不派生。
+	if got := resolveCodexOutboundIdentityForAccount("", nil); got.userAgent != codexCLIUserAgent {
+		t.Fatalf("nil account should use global canonical, got %q", got.userAgent)
+	}
+	if ua, originator := CodexAuthIdentityForAccount(nil); ua != codexCLIUserAgent || originator != openai.CodexDefaultOriginator {
+		t.Fatalf("nil account auth identity mismatch: %q / %q", ua, originator)
+	}
 
 	account := codexProfileTestAccount("acc-1")
 	first := resolveCodexOutboundIdentityForAccount("", account)

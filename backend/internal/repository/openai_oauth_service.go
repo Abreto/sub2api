@@ -83,6 +83,25 @@ func (s *openaiOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 }
 
 func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refreshToken, proxyURL, clientID string) (*openai.TokenResponse, error) {
+	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
+	return s.refreshTokenWithIdentity(ctx, refreshToken, proxyURL, clientID, authUA, authOriginator)
+}
+
+// RefreshTokenWithIdentity 以调用方指定的出站身份对刷新 token（service.
+// OpenAIOAuthClientWithIdentity）：凭据面与推理面共用账号级 canonical 身份，
+// 避免同一 OAuth 凭据跨面呈现两台不同的"机器"。身份参数为空时回退全局 canonical。
+func (s *openaiOAuthService) RefreshTokenWithIdentity(ctx context.Context, refreshToken, proxyURL, clientID, userAgent, originator string) (*openai.TokenResponse, error) {
+	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
+	if strings.TrimSpace(userAgent) != "" {
+		authUA = strings.TrimSpace(userAgent)
+	}
+	if strings.TrimSpace(originator) != "" {
+		authOriginator = strings.TrimSpace(originator)
+	}
+	return s.refreshTokenWithIdentity(ctx, refreshToken, proxyURL, clientID, authUA, authOriginator)
+}
+
+func (s *openaiOAuthService) refreshTokenWithIdentity(ctx context.Context, refreshToken, proxyURL, clientID, authUA, authOriginator string) (*openai.TokenResponse, error) {
 	client, err := createOpenAIReqClient(proxyURL)
 	if err != nil {
 		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_CLIENT_INIT_FAILED", "create HTTP client: %v", err)
@@ -96,7 +115,6 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 
 	var tokenResp openai.TokenResponse
 
-	authUA, authOriginator := service.CodexCanonicalAuthIdentity()
 	resp, err := client.R().
 		SetContext(ctx).
 		SetHeader("User-Agent", authUA).

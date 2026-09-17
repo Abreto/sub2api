@@ -485,9 +485,19 @@ func (s *SettingService) buildSystemSettingsUpdates(ctx context.Context, setting
 	// canonical Codex UA 只接受 CLI 家族（openspec codex-official-client-identity 0c'）：
 	// `Codex ` 家族 / vscode 的版本段语义（app build 号 / 扩展版本线）无法由 CLI
 	// 自动同步正确维护，进 canonical 只会被版本重建改坏成不存在的组合。
+	// 仅在值发生变化时校验：库里已存的旧非法值（升级前配置的过渡 UA）不阻塞
+	// 其他设置的保存；管理员改写或保留该字段提交新值时才强制合法。
 	if ua := strings.TrimSpace(settings.OpenAICodexUserAgent); ua != "" {
-		if err := ValidateOpenAICodexCanonicalUserAgent(ua); err != nil {
-			return nil, err
+		currentSame := false
+		if s != nil && s.settingRepo != nil {
+			if current, curErr := s.settingRepo.GetValue(ctx, SettingKeyOpenAICodexUserAgent); curErr == nil && strings.TrimSpace(current) == ua {
+				currentSame = true
+			}
+		}
+		if !currentSame {
+			if err := ValidateOpenAICodexCanonicalUserAgent(ua); err != nil {
+				return nil, err
+			}
 		}
 	}
 	updates[SettingKeyOpenAICodexUserAgent] = strings.TrimSpace(settings.OpenAICodexUserAgent)

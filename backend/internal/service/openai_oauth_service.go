@@ -218,7 +218,12 @@ func (s *OpenAIOAuthService) RefreshTokenWithClientID(ctx context.Context, refre
 	if err != nil {
 		return nil, err
 	}
+	return s.buildTokenInfoFromResponse(ctx, tokenResp, clientID, proxyURL)
+}
 
+// buildTokenInfoFromResponse 是刷新/换发响应到 OpenAITokenInfo 的公共收尾
+//（ID token 解析、字段映射、best-effort 补全），供凭据面新旧两条调用共用。
+func (s *OpenAIOAuthService) buildTokenInfoFromResponse(ctx context.Context, tokenResp *openai.TokenResponse, clientID, proxyURL string) (*OpenAITokenInfo, error) {
 	// Parse ID token to get user info
 	var userInfo *openai.UserInfo
 	if tokenResp.IDToken != "" {
@@ -386,6 +391,16 @@ func (s *OpenAIOAuthService) RefreshAccountToken(ctx context.Context, account *A
 	}
 
 	clientID := account.GetCredential("client_id")
+	// 凭据面与推理由同一账号身份出站：刷新请求携带账号级 canonical profile
+	//（面板未配置 UA 时派生），避免同一 OAuth 凭据跨面呈现两台不同的"机器"。
+	authUA, authOriginator := CodexAuthIdentityForAccount(account)
+	if clientWithIdentity, ok := s.oauthClient.(OpenAIOAuthClientWithIdentity); ok {
+		tokenResp, err := clientWithIdentity.RefreshTokenWithIdentity(ctx, refreshToken, proxyURL, clientID, authUA, authOriginator)
+		if err != nil {
+			return nil, err
+		}
+		return s.buildTokenInfoFromResponse(ctx, tokenResp, clientID, proxyURL)
+	}
 	return s.RefreshTokenWithClientID(ctx, refreshToken, proxyURL, clientID)
 }
 

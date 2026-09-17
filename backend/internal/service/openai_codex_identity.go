@@ -90,7 +90,14 @@ func CodexCanonicalUserAgent() string {
 // （codex-rs login/default_client.rs 的 default_headers()），version 门槛
 // （issue #3901）只存在于 /backend-api/codex 推理面。
 func CodexCanonicalAuthIdentity() (userAgent, originator string) {
-	identity := resolveCodexOutboundIdentity("")
+	return CodexAuthIdentityForAccount(nil)
+}
+
+// CodexAuthIdentityForAccount 返回账号级凭据面身份对：面板未配置 UA 且派生开启
+// 时使用账号 profile，使同一 OAuth 凭据的刷新请求与推理请求自称同一台"机器"。
+// account 为 nil 或无身份 namespace 时退回全局 canonical（登录首次换发等场景）。
+func CodexAuthIdentityForAccount(account *Account) (userAgent, originator string) {
+	identity := resolveCodexOutboundIdentityForAccount("", account)
 	return identity.userAgent, identity.originator
 }
 
