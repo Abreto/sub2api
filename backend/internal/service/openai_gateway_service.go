@@ -540,6 +540,10 @@ func NewOpenAIGatewayService(
 		SetCodexIdentityEnforcementEnabled(!cfg.Gateway.DisableCodexIdentityEnforcement)
 		// 账号级 canonical UA profile 派生开关（kill-switch）：关闭后退回全局 canonical。
 		SetCodexAccountUAProfileEnabled(!cfg.Gateway.DisableCodexAccountUAProfile)
+		// Phase 1 格子收敛开关（kill-switch）与 ForceCodexCLI 快照：
+		// 格子让出站身份跟随客户端真实平台，ForceCodexCLI / 面板 UA 优先于格子。
+		SetCodexGridUAEnabled(!cfg.Gateway.DisableCodexGridUA)
+		SetCodexForceCodexCLIPublished(cfg.Gateway.ForceCodexCLI)
 	}
 	svc := &OpenAIGatewayService{
 		accountRepo:         accountRepo,

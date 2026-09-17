@@ -28,10 +28,22 @@
 
 ## Phase 1：格子收敛 + 官方客户端门 + 身份派生（阻塞于 Open Questions 1/4）
 
-- [ ] 入站 UA 分类落格器（os × family × arch × version 窗口，per-family 窗口）
-- [ ] CLI 整串生成 / Desktop 窗口内透传 + OS 段归一化
-- [ ] 版本窗口拒绝门（复用 MinCodexVersion + 自动同步派生，差异化文案）
+### 1a. 格子收敛 UA（进行中）
+
+- [x] 入站 UA 分类器（family 白名单 / OS 种类识别 / arch 归格 / 版本窗口 [last-2,∞) ∩ ≥0.144.0）
+- [x] CLI 整串生成（用户真实版本段逐字保留、OS 归一化、terminal 按 (namespace, os) 钉死）
+- [x] Desktop 透传 + 首个 (os; arch) 组归一化（版本与 trailer 逐字保留）
+- [x] enforce 集成与优先级链（账号覆写 > 面板配置/ForceCodexCLI > 格子 > profile 回退）
+- [x] kill-switch `gateway.disable_codex_grid_ua` + ForceCodexCLI 进程级快照
+- [x] 单测：分类/窗口边界（含注入 canonical 联动）/桌面重造与防铸造/拒绝面/优先级（kill-switch/ForceCodexCLI/面板/账号覆写/合成路径不格子化）
+- [x] kimi review 修复收口：P0（Desktop 丢 pairedUA 错配）、P1（合成路径二次格子化→enforce 显式 clientUA 参数、Desktop freeform 槽铸造→terminal/trailer 钉死、版本窗口加上界 [last-2,last+2]）、P2（家族路由前置、strconv 替换手写解析、家族大小写敏感白名单）
+- [ ] 已知缺口（kimi P2 记录在案）：min_codex_version 未并入窗口下界；WS 池化握手身份分桶（随 1b installation 对齐解决）；floor 每请求重算的微优化
+
+### 1b. 后续（未开工）
+
 - [ ] installation-id 按 `(family, os, arch)` class 派生（维度与 UA 格子一致）
+- [ ] 版本过旧拒绝门（差异化文案）——当前过旧流量回退 profile，未拒绝
+- [ ] vscode / atlas / chatgpt_desktop 家族实测后入格（当前回退 profile）
 - [ ] session/thread/window/prompt_cache_key 派生去 apiKeyID
 - [ ] WS 池 compatibility key 无条件纳入 installation-id；ingress 默认 dedicated
 - [ ] OAuth 路径桥接整形删除清单（D7）

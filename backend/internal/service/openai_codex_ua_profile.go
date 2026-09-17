@@ -59,6 +59,16 @@ var codexUAProfileTotalWeight = func() int {
 	return total
 }()
 
+// codexProfileHashMod 返回 sha256(input) 的稳定桶下标（mod 个桶），供
+// profile 加权抽签与格子 terminal 选取等确定性派生共用。
+func codexProfileHashMod(input string, mod int) int {
+	if mod <= 0 {
+		return 0
+	}
+	sum := sha256.Sum256([]byte(input))
+	return int(binary.BigEndian.Uint64(sum[:8]) % uint64(mod))
+}
+
 // deriveCodexUAProfileSuffix 由身份 seed 确定性派生 profile 后缀
 // （" (os; arch) terminal"）。同一 seed 永远返回同一结果：纯函数、零状态、
 // 重启不漂移。目标不是账号间唯一（碰撞合法且符合真实 UA 人口分布），而是

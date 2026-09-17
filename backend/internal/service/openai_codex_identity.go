@@ -266,17 +266,42 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 	enforceCodexIdentityHeadersForAccount(h, nil, overrideUA)
 }
 
-// enforceCodexIdentityHeadersForAccount 是带账号句柄的强制统一入口：canonical 身份
-// 在面板未显式配置 UA 时按账号确定性派生（每账号一台稳定的伪机器），其余语义与
-// enforceCodexIdentityHeadersWithUA 逐点一致。所有拿得到 account 的出站路径
-// （Forward / 透传 / WS / 探针 / 模型列表等）应改用本函数。
+// enforceCodexIdentityHeadersForAccount 是合成出站路径（探针 / 桥接 / Live /
+// 模型列表等网关自产流量的入口：无「客户端真实 UA」语义，格子分支不触发，
+// 直接走 canonical/profile 收口，避免合成的 canonical/profile 被二次格子化
+// 造成探针与推理路径的身份分裂（kimi P1）。
 func enforceCodexIdentityHeadersForAccount(h http.Header, account *Account, overrideUA string) {
+	enforceCodexIdentityHeadersForAccountWithClientUA(h, account, overrideUA, "")
+}
+
+// enforceCodexIdentityHeadersForAccountWithClientUA 是携带客户端真实 UA 的
+// 出站入口（Forward / 透传 / WS 握手 / alpha-search），出站身份优先级：
+//
+//  1. 账号级自定义 UA（管理员显式配置）→ 既有语义（版本段重建）；
+//  2. 面板已配置 UA / ForceCodexCLI → 全局 canonical（管理员显式统一意图）；
+//  3. 格子收敛（默认，design D2）：客户端真实 UA 可分类落格时，出站身份
+//     跟随用户真实平台（CLI 整串生成 / Desktop 家族重造+OS 归一化），
+//     UA 与请求体内的 OS 指纹一致；版本须在 [last-2, last+2] 窗口内；
+//  4. 回退：每账号 profile canonical（Phase 0，openai_codex_ua_profile.go）。
+//
+// clientUA 为空（调用方无法确认 UA 来源）时等价于合成路径，不触发格子。
+// 其余语义与 enforceCodexIdentityHeadersWithUA 逐点一致。
+func enforceCodexIdentityHeadersForAccountWithClientUA(h http.Header, account *Account, overrideUA, clientUA string) {
 	if h == nil || h.Get("originator") == "" {
 		return
 	}
 	if !codexIdentityEnforcement.Load() {
 		pairCodexIdentityHeaders(h)
 		return
+	}
+	if overrideUA == "" && clientUA != "" && codexGridUAEnabled.Load() &&
+		!codexCanonicalPanelUAConfigured() && !codexForceCodexCLIPublished.Load() {
+		if grid, ok := buildCodexGridIdentity(clientUA, codexAccountIdentityNamespace(account)); ok {
+			h.Set("user-agent", grid.userAgent)
+			h.Set("originator", grid.originator)
+			h.Set("version", grid.version)
+			return
+		}
 	}
 	identity := resolveCodexOutboundIdentityForAccount(overrideUA, account)
 	h.Set("user-agent", identity.userAgent)

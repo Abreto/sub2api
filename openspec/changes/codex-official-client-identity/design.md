@@ -28,6 +28,7 @@
 - 不做 UA 归一化（含系统版本）。
 - 不解决账号级聚合负载/用量的隐藏——那是容量问题，靠调度侧并发预算与加号解决，identity 方案不背这个目标。
 - 不改动非 OpenAI 平台与非 codex 协议路径。
+- **不做「每 UA 一对 OAuth 凭据」（2026-09 讨论，明确否决）**：真人多设备的完全一致形态是每机器独立 grant（各自登录、各持 token），但为伪设备复制该形态不划算——① 基数守恒：N 个 grant = 会话列表 N 个会话，把设备数信号原样搬到会话数信号；② 新 grant = 新设备登录，大概率触发邮箱/手机验证挑战，运营上极脆弱；③ N×token 生命周期与账号池调度/failover 交互复杂，且配额本为账号级、零容量收益；④ grant↔设备配对仅是弱间接信号（token session 线索），UA/installation/IP/用量才是直接观测面。拟真缺口由「每账号少量设备」量级下的 per-account profile + class 格子覆盖。
 
 ## Decisions
 
@@ -38,10 +39,11 @@
 - 备选：继续 opt-in `codex_cli_only`。否决：伪装面（桥接整形）正是依赖"门不开也得能过"的存在。
 
 ### D2：UA 策略——Phase 1 采用格子收敛（2026-09 定稿，arch 按 OS 钉/留）
+- **双维度论证（格子方案的立项理由）**：「真实」有两个独立维度——A 账号基数形态（一个 OAuth 多少条 UA）、B 请求内部一致性（UA 与请求体 OS 指纹对不对得上；codex 请求体内含 environment_context 的 cwd（/Users vs /home vs C:\）、tool_call_output 回放的 shell 输出等，UA 与内容矛盾在单个请求内部即可见）。全收敛 A 好但 B 破（所有用户的跨平台路径骑在单一 UA 下）；全透传 B 好但 A 破（UA 数=用户数，AA26-251A 信号 1）；格子唯一同时及格——基数 ≤24/典型 5-10（正常多设备人类），UA 跟随用户真实平台落格（内容一致）。
 - 格子 = `(os × arch, family, version)`：**Mac 钉死 arm64、Windows 钉死 x86_64、Linux 保留用户真实 arch（x86_64/arm64）**——即 4 个 os×arch 组合 × 2 family × 3 version，上界 24，单账号活跃组合典型 5-10。钉死砍掉的是 Mac-Intel / Win-ARM 两个低人口格，HTTP 层不可验证、几乎不损失拟真；Linux 双 arch 保留（ARM 云主机/开发板在开发者人群真实大份额）。入站真实 UA 分类落格，出站 UA 由格子生成：
   - **CLI**：整串生成——`codex-tui/{用户真实版本(窗口内)} ({归一化 OS 串}; {格内 arch}) {terminal}`；terminal 仍按 `(account, os)` 从 seed 确定性定一个高人口值（freeform 字段防铸造，不保留用户值）；OS 版本归一化为「当前主流」，随发版更新表（含 os_info 三段归一化）。
-  - **Desktop**：窗口内**透传 + 仅归一化 OS 段**（trailer 是 app build 号、无同步来源，禁止整串重造）；terminal 天然 `unknown`。
-  - 版本段保留用户真实值（窗口内）；自动同步版本只用于回退流量。窗口 per-family（desktop 引擎版本滞后 CLI 发布线，单独放宽）；下界复用 `MinCodexVersion` 设置 + 自动同步派生，拒绝文案用现成的「请升级 Codex」。
+  - **Desktop**：窗口内**重造而非透传**（kimi 审查加固）——版本段取客户端原值、OS 段归一化、terminal 槽钉死 `unknown`（实测唯一形态）、trailer 仅在 name==originator 且 build 号为数字点分时保留；家族白名单当前仅 `Codex Desktop`（唯一实测名），未实测名/小写变体回退 profile。禁止整串透传的原因：freeform 槽可被按请求铸造 UA 基数，override 包裹形态会保留第三方首段（#3901 错配）。
+  - 版本段保留用户真实值（窗口内）；自动同步版本只用于回退流量。窗口 **[last-2, last+2]**（预发布按基版本判定；加上界的原因：自称未来版本（0.999.0）比陈旧版本更显眼，真实客户端领先同步值几个 minor 是常态所以留 +2 冗余）；下界复用上游硬下界 0.144.0。**已知缺口**：全局 `min_codex_version` 设置暂未并入下界（enforce 收口点无 policy 上下文，待门落地时一并解决）；拒绝文案用现成的「请升级 Codex」（当前出窗流量回退 profile 而非拒绝，拒绝门在 1b）。
 - 超大共享账号的再收紧旋钮：Linux 的 arch 也降级为按 `(account, os)` seed 定一个（上界 →12，不改架构）。
 - **一致性规则：UA 格子维度 = installation 派生 class 维度**（installation 按 `(family, os, arch)` 派生——同 D3 K-bucket class 定义；key 统一含 arch，Mac/Win 天然只有一值无需特判）；UA 含某可变维度而 installation 不含，会让同一 installation 跨该维度的多个值出现（不可能组合转移至设备层）。
 - 备选：原样透传（不做格子）。保留给单租户账号档；共享账号默认格子收敛（AA26-251A 指标 1）。归一化系统版本曾被否决（浓度聚类论），格子方案复活它的原因是：每格 UA 由真实维度差异提供账号内多样性、由 account seed 提供 terminal 差异，不再是全网关同串——浓度担忧只适用于无差异的全局归一。

@@ -991,6 +991,11 @@ type GatewayConfig struct {
 	// 按其身份 namespace 确定性派生一个稳定的机器 profile，替代全网关共享的编译期
 	// 常量 UA。取反义命名同上：零值落在「派生开启」一侧。
 	DisableCodexAccountUAProfile bool `mapstructure:"disable_codex_account_ua_profile"`
+	// DisableCodexGridUA: 关闭 Phase 1 格子收敛（kill-switch）。开启时（默认），
+	// 官方客户端的出站身份跟随其真实平台分类落格（CLI 整串生成、Desktop 透传
+	// +OS 归一化、版本窗口校验），不可分类流量回退账号 profile。面板已配置 UA
+	// 或 ForceCodexCLI 时格子不生效（管理员显式统一意图优先）。
+	DisableCodexGridUA bool `mapstructure:"disable_codex_grid_ua"`
 	// DisableCodexOriginatorNormalization: 已废弃，等价于 DisableCodexIdentityEnforcement。
 	// 保留以兼容既有配置文件；加载时会折叠进新键，不要在新代码里直接读取。
 	DisableCodexOriginatorNormalization bool `mapstructure:"disable_codex_originator_normalization"`
@@ -2383,6 +2388,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.force_codex_cli", false)
 	viper.SetDefault("gateway.disable_codex_identity_enforcement", false)
 	viper.SetDefault("gateway.disable_codex_account_ua_profile", false)
+	viper.SetDefault("gateway.disable_codex_grid_ua", false)
 	viper.SetDefault("gateway.disable_codex_originator_normalization", false)
 	viper.SetDefault("gateway.codex_image_generation_bridge_enabled", false)
 	viper.SetDefault("gateway.openai_passthrough_allow_timeout_headers", false)
